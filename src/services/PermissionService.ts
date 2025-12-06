@@ -71,7 +71,7 @@ export class PermissionService {
     public async canDeleteMessage(
         userId: UserId,
         roomId: RoomId,
-        messageId: MessageId
+        _messageId: MessageId
     ): Promise<boolean> {
         const room = await this.roomService.getRoomById(roomId);
 
