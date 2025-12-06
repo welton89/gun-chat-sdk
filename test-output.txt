@@ -1,0 +1,125 @@
+
+> @gun-chat/sdk@0.1.0 test
+> jest
+
+FAIL tests/unit/UserService.test.ts
+  ● Console
+
+    console.log
+      Hello wonderful person! :) Thanks for using GUN, please ask for help on http://chat.gun.eco if anything takes you longer than 5min to figure out!
+
+      at Gun.log (node_modules/gun/gun.js:542:55)
+
+  ● UserService › createUser › should create a new user successfully
+
+    TypeError: Cannot read properties of undefined (reading 'create')
+
+      45 |
+      46 |             // Mock successful creation
+    > 47 |             mockUser.create.mockImplementation((_alias: string, _password: string, callback: any) => {
+         |                      ^
+      48 |                 callback({ ok: true });
+      49 |             });
+      50 |
+
+      at Object.<anonymous> (tests/unit/UserService.test.ts:47:22)
+
+  ● UserService › createUser › should reject if user creation fails
+
+    TypeError: Cannot read properties of undefined (reading 'create')
+
+      71 |
+      72 |             // Mock failed creation
+    > 73 |             mockUser.create.mockImplementation((_alias: string, _password: string, callback: any) => {
+         |                      ^
+      74 |                 callback({ err: 'User already exists' });
+      75 |             });
+      76 |
+
+      at Object.<anonymous> (tests/unit/UserService.test.ts:73:22)
+
+  ● UserService › createUser › should reject if authentication fails after creation
+
+    TypeError: Cannot read properties of undefined (reading 'create')
+
+      87 |
+      88 |             // Mock successful creation
+    > 89 |             mockUser.create.mockImplementation((_alias: string, _password: string, callback: any) => {
+         |                      ^
+      90 |                 callback({ ok: true });
+      91 |             });
+      92 |
+
+      at Object.<anonymous> (tests/unit/UserService.test.ts:89:22)
+
+  ● UserService › authenticate › should authenticate user with valid credentials
+
+    TypeError: Cannot read properties of undefined (reading 'auth')
+
+      110 |
+      111 |             // Mock successful authentication
+    > 112 |             mockUser.auth.mockImplementation((_alias: string, _password: string, callback: any) => {
+          |                      ^
+      113 |                 callback({ ok: true });
+      114 |             });
+      115 |
+
+      at Object.<anonymous> (tests/unit/UserService.test.ts:112:22)
+
+  ● UserService › authenticate › should reject with invalid credentials
+
+    TypeError: Cannot read properties of undefined (reading 'auth')
+
+      138 |
+      139 |             // Mock failed authentication
+    > 140 |             mockUser.auth.mockImplementation((_alias: string, _password: string, callback: any) => {
+          |                      ^
+      141 |                 callback({ err: 'Wrong password' });
+      142 |             });
+      143 |
+
+      at Object.<anonymous> (tests/unit/UserService.test.ts:140:22)
+
+  ● UserService › authenticate › should reject if user not found after authentication
+
+    TypeError: Cannot read properties of undefined (reading 'auth')
+
+      154 |
+      155 |             // Mock successful authentication
+    > 156 |             mockUser.auth.mockImplementation((_alias: string, _password: string, callback: any) => {
+          |                      ^
+      157 |                 callback({ ok: true });
+      158 |             });
+      159 |
+
+      at Object.<anonymous> (tests/unit/UserService.test.ts:156:22)
+
+  ● UserService › logout › should call user.leave()
+
+    TypeError: Cannot read properties of undefined (reading 'leave')
+
+      128 |     public logout(): void {
+      129 |         const user = this.gunService.getUser();
+    > 130 |         user.leave();
+          |              ^
+      131 |     }
+      132 | }
+      133 |
+
+      at UserService.logout (src/services/UserService.ts:130:14)
+      at Object.<anonymous> (tests/unit/UserService.test.ts:252:25)
+
+PASS tests/unit/RoomService.test.ts
+  ● Console
+
+    console.log
+      Hello wonderful person! :) Thanks for using GUN, please ask for help on http://chat.gun.eco if anything takes you longer than 5min to figure out!
+
+      at Gun.log (node_modules/gun/gun.js:542:55)
+
+
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       7 failed, 21 passed, 28 total
+Snapshots:   0 total
+Time:        0.952 s, estimated 1 s
+Ran all test suites.

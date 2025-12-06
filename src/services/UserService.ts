@@ -94,8 +94,16 @@ export class UserService {
      * Get user by ID
      */
     public async getUser(userId: UserId): Promise<User | null> {
-        const userData = await this.gunService.get(`users/${userId}`);
-        return userData || null;
+        const user = await this.gunService.get(`users/${userId}`);
+        if (!user) return null;
+
+        // Fetch profile explicitly to ensure we get the data, not just a reference
+        const profile = await this.gunService.get(`users/${userId}/profile`);
+        if (profile) {
+            user.profile = profile;
+        }
+
+        return user as User;
     }
 
     /**

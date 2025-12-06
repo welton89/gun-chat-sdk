@@ -60,7 +60,12 @@ export class RoomService {
             },
         };
 
-        await this.gunService.put(`rooms/${roomId}`, room);
+        const roomData = {
+            ...room,
+            typeMsg: room.typeMsg.reduce((acc, type) => ({ ...acc, [type]: true }), {}),
+        };
+
+        await this.gunService.put(`rooms/${roomId}`, roomData);
         return room;
     }
 
@@ -68,8 +73,17 @@ export class RoomService {
      * Get room by ID
      */
     public async getRoomById(roomId: RoomId): Promise<Room | null> {
-        const room = await this.gunService.get(`rooms/${roomId}`);
-        return room || null;
+        const roomData = await this.gunService.get(`rooms/${roomId}`);
+
+        if (!roomData) return null;
+
+        // Convert typeMsg object back to array
+        const typeMsg = roomData.typeMsg ? Object.keys(roomData.typeMsg) : [];
+
+        return {
+            ...roomData,
+            typeMsg: typeMsg as MessageType[],
+        };
     }
 
     /**
@@ -91,7 +105,8 @@ export class RoomService {
         }
 
         if (dto.typeMsg) {
-            await this.gunService.put(`rooms/${dto.roomId}/typeMsg`, dto.typeMsg);
+            const typeMsgObj = dto.typeMsg.reduce((acc, type) => ({ ...acc, [type]: true }), {});
+            await this.gunService.put(`rooms/${dto.roomId}/typeMsg`, typeMsgObj);
         }
     }
 

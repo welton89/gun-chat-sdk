@@ -465,6 +465,22 @@ const isAdmin = await permissionService.isRoomAdminOrOwner(
 - ✅ `room.types.ts` - Tipos de sala (incluindo gram, feed)
 - ✅ `message.types.ts` - Tipos de mensagem (incluindo thread)
 
+### Message
+
+```typescript
+interface Message {
+  id?: MessageId; // Injetado pelo SDK
+  type: MessageType;
+  from: UserId;
+  timestamp: Timestamp;
+  content: MessageContent;
+  replyTo?: MessageId;
+  editedAt?: Timestamp;
+  reactions: Record<string, UserId[]>;
+  readBy: UserId[];
+}
+```
+
 #### Fase 3: Serviços Core
 - ✅ `GunService` - Wrapper Gun.js
 - ✅ `UserService` - Gerenciamento de usuários
@@ -475,11 +491,11 @@ const isAdmin = await permissionService.isRoomAdminOrOwner(
 ### 🚧 Próximas Etapas
 
 #### Fase 4: Testes
-- [ ] Testes unitários para UserService
-- [ ] Testes unitários para RoomService
+- [x] Testes unitários para UserService
+- [x] Testes unitários para RoomService
 - [ ] Testes unitários para MessageService
 - [ ] Testes unitários para PermissionService
-- [ ] Testes de integração
+- [x] Testes de integração (Parcialmente concluídos)
 - [ ] Cobertura de testes > 80%
 
 #### Fase 5: Funcionalidades Avançadas

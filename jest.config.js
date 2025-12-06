@@ -20,5 +20,6 @@ module.exports = {
     moduleFileExtensions: ['ts', 'js', 'json'],
     transform: {
         '^.+\\.ts$': 'ts-jest'
-    }
+    },
+    testTimeout: 15000, // 15 seconds for integration tests
 };

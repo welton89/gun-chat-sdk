@@ -44,10 +44,15 @@ export class GunService {
     }
 
     /**
-     * Get a Gun node by path
-     */
+   * Get a Gun node by path
+   */
     public getNode(path: string): any {
-        return this.gun.get(path);
+        const parts = path.split('/');
+        let node = this.gun;
+        for (const part of parts) {
+            node = node.get(part);
+        }
+        return node;
     }
 
     /**

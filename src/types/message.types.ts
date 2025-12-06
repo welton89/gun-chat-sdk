@@ -75,6 +75,7 @@ export type MessageContent =
  * Message entity
  */
 export interface Message {
+    id?: MessageId;
     type: MessageType;
     from: UserId;
     timestamp: Timestamp;
