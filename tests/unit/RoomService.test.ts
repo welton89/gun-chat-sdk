@@ -158,10 +158,10 @@ describe('RoomService', () => {
     describe('getRoomById', () => {
         it('should return room if exists', async () => {
             const roomId = 'test-room-id';
-            const mockRoom = {
+            const mockRoomData = {
                 name: 'Test Room',
                 type: 'public' as const,
-                typeMsg: ['text' as const],
+                typeMsg: { text: true },
                 owner: 'owner-id',
                 createdAt: Date.now(),
                 settings: {
@@ -172,11 +172,16 @@ describe('RoomService', () => {
                 members: {},
             };
 
-            jest.spyOn(gunService, 'get').mockResolvedValue(mockRoom);
+            const expectedRoom = {
+                ...mockRoomData,
+                typeMsg: ['text'],
+            };
+
+            jest.spyOn(gunService, 'get').mockResolvedValue(mockRoomData);
 
             const room = await roomService.getRoomById(roomId);
 
-            expect(room).toEqual(mockRoom);
+            expect(room).toEqual(expectedRoom);
             expect(gunService.get).toHaveBeenCalledWith(`rooms/${roomId}`);
         });
 

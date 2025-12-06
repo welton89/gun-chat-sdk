@@ -106,6 +106,7 @@ interface UserProfile {
 
 ```typescript
 interface Room {
+  id?: string; // Injetado pelo SDK
   name: string;
   type: RoomType;
   typeMsg: MessageType[];  // Tipos de mensagens permitidas
@@ -114,26 +115,14 @@ interface Room {
   settings: RoomSettings;
   members: Record<UserId, RoomMember>;
 }
-
-interface RoomSettings {
-  description?: string;
-  avatar?: string;
-  maxMembers: number;
-  allowInvites: boolean;
-  isNSFW: boolean;
-}
-
-interface RoomMember {
-  role: MemberRole;
-  joinedAt: Timestamp;
-  permissions: MemberPermissions;
-}
+// ...
 ```
 
 ### Message
 
 ```typescript
 interface Message {
+  id?: string; // Injetado pelo SDK
   type: MessageType;
   from: UserId;
   timestamp: Timestamp;

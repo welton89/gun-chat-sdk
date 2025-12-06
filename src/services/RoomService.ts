@@ -60,12 +60,32 @@ export class RoomService {
             },
         };
 
-        const roomData = {
+        const roomData: any = {
             ...room,
             typeMsg: room.typeMsg.reduce((acc, type) => ({ ...acc, [type]: true }), {}),
         };
 
+        // Remove undefined keys to avoid Gun.js errors
+        Object.keys(roomData).forEach(key => {
+            if (roomData[key] === undefined) {
+                delete roomData[key];
+            }
+        });
+
+        // Also clean nested settings if needed, though they have defaults
+        // Clean members undefined fields if any
+        if (roomData.members) {
+            Object.keys(roomData.members).forEach(memberId => {
+                const member = roomData.members[memberId];
+                Object.keys(member).forEach(k => {
+                    if (member[k] === undefined) delete member[k];
+                });
+            });
+        }
+
+        console.log('CreateRoom: Saving room data', roomId, roomData);
         await this.gunService.put(`rooms/${roomId}`, roomData);
+        console.log('CreateRoom: Room saved');
         return room;
     }
 
@@ -73,17 +93,37 @@ export class RoomService {
      * Get room by ID
      */
     public async getRoomById(roomId: RoomId): Promise<Room | null> {
+        console.log(`GetRoomById: Fetching ${roomId}`);
         const roomData = await this.gunService.get(`rooms/${roomId}`);
 
-        if (!roomData) return null;
+        if (!roomData) {
+            console.log(`GetRoomById: Room ${roomId} not found`);
+            return null;
+        }
+
+        // Fetch members explicitly to ensure we have the full list
+        // Gun might return a reference for the members object
+        let members = roomData.members;
+        // Check if members is missing or looks like a reference (has no user keys but has metadata)
+        // A simple way is to just always fetch the members node to be safe
+        console.log(`GetRoomById: Fetching members for ${roomId}`);
+        const membersData = await this.gunService.get(`rooms/${roomId}/members`);
+        if (membersData) {
+            members = membersData;
+        }
+        console.log(`GetRoomById: Members data`, members);
 
         // Convert typeMsg object back to array
         const typeMsg = roomData.typeMsg ? Object.keys(roomData.typeMsg) : [];
 
-        return {
+        const room = {
             ...roomData,
+            id: roomId,
             typeMsg: typeMsg as MessageType[],
+            members: members || {},
         };
+
+        return room;
     }
 
     /**
@@ -159,20 +199,44 @@ export class RoomService {
      * List rooms for a user
      */
     public async listRooms(userId: UserId): Promise<Room[]> {
+        console.log('ListRooms: Fetching rooms for user', userId);
         // This is a simplified implementation
         // In production, you'd want to maintain an index of user's rooms
         const allRooms = await this.gunService.get('rooms');
-        const userRooms: Room[] = [];
+        console.log('ListRooms: Raw rooms data', allRooms);
 
-        if (allRooms) {
-            for (const roomId in allRooms) {
-                const room = allRooms[roomId];
-                if (room && room.members && room.members[userId]) {
-                    userRooms.push(room);
-                }
-            }
+        if (!allRooms) {
+            console.log('ListRooms: No rooms found in database.');
+            return [];
         }
 
+        console.log('ListRooms: Found raw rooms keys', Object.keys(allRooms).length);
+
+        const roomPromises = Object.keys(allRooms).map(async (roomId) => {
+            // Skip Gun metadata
+            if (roomId === '_' || roomId === '#') return null;
+
+            const room = allRooms[roomId];
+
+            // We might need to fetch the room details if they are not fully loaded in the list
+            let fullRoom = room;
+            if (!room.members) {
+                // console.log(`ListRooms: Fetching full details for room ${roomId}`);
+                fullRoom = await this.getRoomById(roomId);
+            }
+
+            if (fullRoom && fullRoom.members && fullRoom.members[userId]) {
+                // Ensure ID is present
+                if (!fullRoom.id) fullRoom.id = roomId;
+                return fullRoom;
+            }
+            return null;
+        });
+
+        const results = await Promise.all(roomPromises);
+        const userRooms = results.filter(room => room !== null) as Room[];
+
+        console.log('ListRooms: Found rooms', userRooms);
         return userRooms;
     }
 

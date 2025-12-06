@@ -1,32 +1,35 @@
+
 import { GunService } from '../../src/services/GunService';
 import { UserService } from '../../src/services/UserService';
 import { CreateUserDTO, AuthenticateUserDTO } from '../../src/types';
 
-// Mock Gun.js
-jest.mock('gun', () => {
-    return jest.fn(() => ({
-        user: jest.fn(() => ({
+// Mock GunService
+jest.mock('../../src/services/GunService');
+
+describe('UserService', () => {
+    let gunService: jest.Mocked<GunService>;
+    let userService: UserService;
+    let mockUser: any;
+
+    beforeEach(() => {
+        // Clear all mocks
+        jest.clearAllMocks();
+
+        // Setup mock user
+        mockUser = {
             create: jest.fn(),
             auth: jest.fn(),
             is: { pub: 'mock-user-id' },
-            recall: jest.fn(),
+            recall: jest.fn().mockReturnThis(),
             leave: jest.fn(),
-        })),
-        get: jest.fn(() => ({
-            put: jest.fn(),
-            once: jest.fn(),
-            on: jest.fn(),
-            off: jest.fn(),
-        })),
-    }));
-});
+        };
 
-describe('UserService', () => {
-    let gunService: GunService;
-    let userService: UserService;
+        // Setup GunService mock
+        gunService = new (GunService as any)() as jest.Mocked<GunService>;
+        gunService.getUser.mockReturnValue(mockUser);
+        gunService.get.mockResolvedValue(null);
+        gunService.put.mockResolvedValue(undefined);
 
-    beforeEach(() => {
-        gunService = GunService.getInstance();
         userService = new UserService(gunService);
     });
 
@@ -41,7 +44,7 @@ describe('UserService', () => {
                 },
             };
 
-            const mockUser = gunService.getUser();
+
 
             // Mock successful creation
             mockUser.create.mockImplementation((_alias: string, _password: string, callback: any) => {
@@ -50,8 +53,12 @@ describe('UserService', () => {
 
             // Mock successful authentication
             mockUser.auth.mockImplementation((_alias: string, _password: string, callback: any) => {
-                callback({ ok: true });
+                callback({ ok: true, sea: { pub: 'mock-user-id' } });
             });
+
+            // Mock gunService.get to return null (user doesn't exist yet) or user data
+            // In authenticate, it fetches user.
+            jest.spyOn(gunService, 'get').mockResolvedValue({ alias: 'testuser', pub: 'mock-user-id' });
 
             const user = await userService.createUser(dto);
 
@@ -67,8 +74,6 @@ describe('UserService', () => {
                 password: 'password123',
             };
 
-            const mockUser = gunService.getUser();
-
             // Mock failed creation
             mockUser.create.mockImplementation((_alias: string, _password: string, callback: any) => {
                 callback({ err: 'User already exists' });
@@ -83,7 +88,7 @@ describe('UserService', () => {
                 password: 'password123',
             };
 
-            const mockUser = gunService.getUser();
+
 
             // Mock successful creation
             mockUser.create.mockImplementation((_alias: string, _password: string, callback: any) => {
@@ -106,11 +111,11 @@ describe('UserService', () => {
                 password: 'password123',
             };
 
-            const mockUser = gunService.getUser();
+
 
             // Mock successful authentication
             mockUser.auth.mockImplementation((_alias: string, _password: string, callback: any) => {
-                callback({ ok: true });
+                callback({ ok: true, sea: { pub: 'mock-user-id' } });
             });
 
             // Mock getUser to return user data
@@ -120,6 +125,9 @@ describe('UserService', () => {
                 profile: { status: 'offline' },
                 createdAt: Date.now(),
             });
+
+            // Also mock gunService.get just in case
+            jest.spyOn(gunService, 'get').mockResolvedValue({ alias: 'testuser' });
 
             const user = await userService.authenticate(dto);
 
@@ -133,8 +141,6 @@ describe('UserService', () => {
                 alias: 'testuser',
                 password: 'wrongpassword',
             };
-
-            const mockUser = gunService.getUser();
 
             // Mock failed authentication
             mockUser.auth.mockImplementation((_alias: string, _password: string, callback: any) => {
@@ -150,11 +156,11 @@ describe('UserService', () => {
                 password: 'password123',
             };
 
-            const mockUser = gunService.getUser();
+
 
             // Mock successful authentication
             mockUser.auth.mockImplementation((_alias: string, _password: string, callback: any) => {
-                callback({ ok: true });
+                callback({ ok: true, sea: { pub: 'mock-user-id' } });
             });
 
             // Mock getUser to return null
@@ -247,8 +253,6 @@ describe('UserService', () => {
 
     describe('logout', () => {
         it('should call user.leave()', () => {
-            const mockUser = gunService.getUser();
-
             userService.logout();
 
             expect(mockUser.leave).toHaveBeenCalled();

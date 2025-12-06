@@ -33,6 +33,7 @@ export class MessageService {
    * Send a text message
    */
     public async sendMessage(dto: SendTextMessageDTO, userId: UserId): Promise<Message> {
+        console.log('MessageService: sendMessage called', dto, userId);
         const messageId = uuidv4();
         const content: TextContent = { body: dto.body };
 
@@ -47,7 +48,9 @@ export class MessageService {
         };
 
         const messageData = this.serializeMessage(message);
+        console.log('MessageService: Saving message data', messageData);
         await this.gunService.put(`messages/${dto.roomId}/${messageId}`, messageData);
+        console.log('MessageService: Message saved');
         return message;
     }
 
@@ -216,20 +219,34 @@ export class MessageService {
         before?: Timestamp
     ): Promise<Message[]> {
         const allMessages = await this.gunService.get(`messages/${roomId}`);
-        const messages: Message[] = [];
+        let messages: Message[] = [];
 
         if (allMessages) {
-            for (const messageId in allMessages) {
+            const messagePromises = Object.keys(allMessages).map(async (messageId) => {
                 // Skip Gun metadata
-                if (messageId === '_' || messageId === '#') continue;
+                if (messageId === '_' || messageId === '#') return null;
 
-                const messageData = allMessages[messageId];
+                let messageData = allMessages[messageId];
+
+                // If messageData is just a link or missing core fields, fetch the full node
+                if (!messageData || !messageData.from || !messageData.type) {
+                    // console.log(`GetMessages: Fetching full message ${messageId}`);
+                    const fullMessage = await this.gunService.get(`messages/${roomId}/${messageId}`);
+                    if (fullMessage) {
+                        messageData = fullMessage;
+                    }
+                }
+
                 if (messageData && (!before || messageData.timestamp < before)) {
                     const message = this.deserializeMessage(messageData);
                     message.id = messageId;
-                    messages.push(message);
+                    return message;
                 }
-            }
+                return null;
+            });
+
+            const results = await Promise.all(messagePromises);
+            messages = results.filter(msg => msg !== null) as Message[];
         }
 
         // Sort by timestamp descending

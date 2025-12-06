@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gun.js Chat SDK Test</title>
+    <link rel="stylesheet" href="./style.css" />
+</head>
+
+<body>
+    <div id="app">
+        <div class="container">
+            <header>
+                <h1>Gun.js Chat SDK</h1>
+                <div id="user-status" class="hidden">
+                    <span id="current-user"></span>
+                    <button id="logout-btn">Logout</button>
+                </div>
+            </header>
+
+            <main>
+                <!-- Auth Section -->
+                <section id="auth-section">
+                    <div class="card glass">
+                        <h2>Welcome</h2>
+                        <div class="tabs">
+                            <button class="tab-btn active" data-tab="login">Login</button>
+                            <button class="tab-btn" data-tab="register">Register</button>
+                        </div>
+
+                        <form id="auth-form">
+                            <div class="input-group">
+                                <input type="text" id="alias" placeholder="Username" required />
+                            </div>
+                            <div class="input-group">
+                                <input type="password" id="password" placeholder="Password" required />
+                            </div>
+                            <div id="register-fields" class="hidden">
+                                <div class="input-group">
+                                    <input type="text" id="bio" placeholder="Bio (optional)" />
+                                </div>
+                            </div>
+                            <button type="submit" id="auth-submit">Login</button>
+                        </form>
+                        <p id="auth-error" class="error"></p>
+                    </div>
+                </section>
+
+                <!-- Chat Section -->
+                <section id="chat-section" class="hidden">
+                    <div class="sidebar glass">
+                        <div class="sidebar-header">
+                            <h3>Rooms</h3>
+                            <button id="create-room-btn" class="icon-btn">+</button>
+                        </div>
+                        <ul id="room-list">
+                            <!-- Rooms will be injected here -->
+                        </ul>
+                    </div>
+
+                    <div class="chat-area glass">
+                        <div id="chat-header" class="hidden">
+                            <h3 id="current-room-name">Select a room</h3>
+                            <span id="room-id-display"></span>
+                        </div>
+
+                        <div id="messages-container">
+                            <div class="empty-state">Select a room to start chatting</div>
+                        </div>
+
+                        <form id="message-form" class="hidden">
+                            <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off" />
+                            <button type="submit">Send</button>
+                        </form>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modal for Create Room -->
+    <div id="modal-overlay" class="hidden">
+        <div class="modal glass">
+            <h2>Create Room</h2>
+            <input type="text" id="new-room-name" placeholder="Room Name" />
+            <select id="new-room-type">
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+            </select>
+            <div class="modal-actions">
+                <button id="cancel-room-btn">Cancel</button>
+                <button id="confirm-room-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+</body>
+
+</html>

@@ -3,8 +3,8 @@
  * TypeScript SDK for decentralized chat using Gun.js
  */
 
-export * from './types';
-export * from './services';
+export * from './types/index';
+export * from './services/index';
 
 // Re-export main classes for convenience
 export { GunService } from './services/GunService';

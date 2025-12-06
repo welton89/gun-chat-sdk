@@ -33,6 +33,7 @@ export interface RoomMember {
  * Room entity
  */
 export interface Room {
+    id?: string;
     name: string;
     type: RoomType;
     typeMsg: MessageType[]; // Allowed message types in this room
