@@ -1,3 +1,4 @@
+
 import { MessageService } from '../../src/services/MessageService';
 import { GunService } from '../../src/services/GunService';
 import { Message, MessageType } from '../../src/types';
@@ -9,6 +10,17 @@ const mockGunService = {
     getInstance: jest.fn(),
 } as unknown as GunService;
 
+// Mock CryptoService
+const mockCryptoService = {
+    encryptSymmetric: jest.fn(),
+    decryptSymmetric: jest.fn(),
+};
+
+// Mock RoomService
+const mockRoomService = {
+    getRoomKey: jest.fn(),
+};
+
 describe('MessageService Unit Tests', () => {
     let messageService: MessageService;
     const roomId = 'room-123';
@@ -16,7 +28,8 @@ describe('MessageService Unit Tests', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        messageService = new MessageService(mockGunService);
+        mockRoomService.getRoomKey.mockResolvedValue(null);
+        messageService = new MessageService(mockGunService, mockRoomService as any, mockCryptoService as any);
     });
 
     describe('sendMessage', () => {
@@ -26,8 +39,8 @@ describe('MessageService Unit Tests', () => {
                 body: 'Hello World',
             };
 
-            // Mock put to resolve
             (mockGunService.put as jest.Mock).mockResolvedValue(undefined);
+            mockRoomService.getRoomKey.mockResolvedValue(null); // No encryption for this test
 
             const message = await messageService.sendMessage(dto, userId);
 
@@ -37,17 +50,32 @@ describe('MessageService Unit Tests', () => {
             expect(message.from).toBe(userId);
             expect(message.readBy).toContain(userId);
 
-            // Verify Gun interaction
             expect(mockGunService.put).toHaveBeenCalledWith(
                 expect.stringContaining(`messages/${roomId}/`),
                 expect.objectContaining({
                     type: 'text',
                     content: { body: 'Hello World' },
-                    // Verify serialization of arrays to objects
                     readBy: { [userId]: true },
                     reactions: {}
                 })
             );
+        });
+
+        it('should encrypt message if room key exists', async () => {
+            const dto = {
+                roomId,
+                body: 'Secret Message',
+            };
+
+            (mockGunService.put as jest.Mock).mockResolvedValue(undefined);
+            mockRoomService.getRoomKey.mockResolvedValue('room-key');
+            mockCryptoService.encryptSymmetric.mockResolvedValue('encrypted-content');
+
+            const message = await messageService.sendMessage(dto, userId);
+
+            expect(message.isEncrypted).toBe(true);
+            expect(message.content).toBe('encrypted-content');
+            expect(mockCryptoService.encryptSymmetric).toHaveBeenCalledWith({ body: 'Secret Message' }, 'room-key');
         });
     });
 
@@ -86,17 +114,45 @@ describe('MessageService Unit Tests', () => {
             expect(message.type).toBe('poll');
             expect((message.content as any).question).toBe(dto.question);
 
-            // Verify serialization in Gun put
             expect(mockGunService.put).toHaveBeenCalledWith(
                 expect.stringContaining(`messages/${roomId}/`),
                 expect.objectContaining({
                     type: 'poll',
                     content: expect.objectContaining({
-                        // Options should be object with index keys
                         options: { '0': 'Red', '1': 'Blue' },
                         votes: {}
                     })
                 })
+            );
+        });
+    });
+
+    describe('votePoll', () => {
+        it('should vote in a poll', async () => {
+            const dto = {
+                roomId,
+                messageId: 'poll-123',
+                optionIndex: 0,
+                userId
+            };
+
+            const mockPollData = {
+                type: 'poll',
+                from: 'other-user',
+                content: {
+                    question: 'Q?',
+                    options: { '0': 'A', '1': 'B' },
+                    votes: {}
+                }
+            };
+            (mockGunService.get as jest.Mock).mockResolvedValue(mockPollData);
+            (mockGunService.put as jest.Mock).mockResolvedValue(undefined);
+
+            await messageService.votePoll(dto);
+
+            expect(mockGunService.put).toHaveBeenCalledWith(
+                `messages/${roomId}/${dto.messageId}/content/votes/${dto.optionIndex}/${userId}`,
+                true
             );
         });
     });
@@ -110,9 +166,9 @@ describe('MessageService Unit Tests', () => {
                     from: userId,
                     timestamp: Date.now(),
                     content: { body: 'Hi' },
-                    readBy: { [userId]: true }, // Serialized format
+                    readBy: { [userId]: true },
                     reactions: {
-                        '👍': { [userId]: true } // Serialized format
+                        '👍': { [userId]: true }
                     }
                 }
             };
@@ -126,7 +182,6 @@ describe('MessageService Unit Tests', () => {
 
             expect(msg.id).toBe(mockMessageId);
             expect(msg.type).toBe('text');
-            // Verify deserialization back to arrays
             expect(Array.isArray(msg.readBy)).toBe(true);
             expect(msg.readBy).toContain(userId);
             expect(Array.isArray(msg.reactions['👍'])).toBe(true);
@@ -142,8 +197,8 @@ describe('MessageService Unit Tests', () => {
                     timestamp: Date.now(),
                     content: {
                         question: 'Q?',
-                        options: { '0': 'A', '1': 'B' }, // Serialized
-                        votes: { '0': { [userId]: true } } // Serialized
+                        options: { '0': 'A', '1': 'B' },
+                        votes: { '0': { [userId]: true } }
                     },
                     readBy: {},
                     reactions: {}
@@ -158,14 +213,85 @@ describe('MessageService Unit Tests', () => {
             expect(msg.type).toBe('poll');
             const content = msg.content as any;
 
-            // Verify options deserialized to array
             expect(Array.isArray(content.options)).toBe(true);
             expect(content.options[0]).toBe('A');
             expect(content.options[1]).toBe('B');
 
-            // Verify votes deserialized
             expect(Array.isArray(content.votes['0'])).toBe(true);
             expect(content.votes['0']).toContain(userId);
+        });
+    });
+
+    describe('createThread', () => {
+        it('should create a thread message correctly', async () => {
+            const dto = {
+                roomId,
+                parentMessageId: 'parent-msg-123',
+                body: 'This is a reply'
+            };
+
+            (mockGunService.put as jest.Mock).mockResolvedValue(undefined);
+
+            const message = await messageService.createThread(dto, userId);
+
+            expect(message.type).toBe('thread');
+            expect((message.content as any).parentMessageId).toBe(dto.parentMessageId);
+            expect((message.content as any).body).toBe(dto.body);
+
+            expect(mockGunService.put).toHaveBeenCalledWith(
+                expect.stringContaining(`messages/${roomId}/`),
+                expect.objectContaining({
+                    type: 'thread',
+                    content: expect.objectContaining({
+                        parentMessageId: dto.parentMessageId,
+                        body: dto.body
+                    })
+                })
+            );
+        });
+    });
+
+    describe('Reactions', () => {
+        it('should add a reaction', async () => {
+            const dto = {
+                roomId,
+                messageId: 'msg-123',
+                emoji: '👍',
+                userId
+            };
+
+            const mockMessageData = {
+                type: 'text',
+                from: 'other-user',
+                content: { body: 'Hi' }
+            };
+            (mockGunService.get as jest.Mock).mockResolvedValue(mockMessageData);
+            (mockGunService.put as jest.Mock).mockResolvedValue(undefined);
+
+            await messageService.addReaction(dto);
+
+            expect(mockGunService.put).toHaveBeenCalledWith(
+                `messages/${roomId}/${dto.messageId}/reactions/${dto.emoji}/${userId}`,
+                true
+            );
+        });
+
+        it('should remove a reaction', async () => {
+            const dto = {
+                roomId,
+                messageId: 'msg-123',
+                emoji: '👍',
+                userId
+            };
+
+            (mockGunService.put as jest.Mock).mockResolvedValue(undefined);
+
+            await messageService.removeReaction(dto);
+
+            expect(mockGunService.put).toHaveBeenCalledWith(
+                `messages/${roomId}/${dto.messageId}/reactions/${dto.emoji}/${userId}`,
+                null
+            );
         });
     });
 });

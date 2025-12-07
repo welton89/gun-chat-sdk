@@ -1,12 +1,13 @@
-import { GunService, UserService, RoomService, MessageService, PermissionService } from '../../src';
+import { GunService, UserService, RoomService, MessageService, PermissionService, CryptoService } from '../../src';
 import { CreateUserDTO, AuthenticateUserDTO, RoomType } from '../../src/types';
 
 // Initialize Services
 // Configure peers - using the public one provided by user
 const gunService = GunService.getInstance(['https://gunjs-chat.squareweb.app/gun']);
 
+const cryptoService = new CryptoService();
 const userService = new UserService(gunService);
-const roomService = new RoomService(gunService);
+const roomService = new RoomService(gunService, cryptoService);
 const messageService = new MessageService(gunService);
 // PermissionService is not strictly needed for the basic UI flow but good to have
 const permissionService = new PermissionService(roomService, messageService);
@@ -41,6 +42,29 @@ const tabBtns = document.querySelectorAll('.tab-btn');
 const registerFields = document.getElementById('register-fields')!;
 const authSubmit = document.getElementById('auth-submit')!;
 const authError = document.getElementById('auth-error')!;
+
+// Thread State & DOM
+let replyingToMessageId: string | null = null;
+// We need to define createReplyIndicator before using it if we use it here, 
+// OR we can just initialize it lazily or move the function up.
+// Better to just create it if not exists here or use a getter.
+// But createReplyIndicator uses messageForm which is defined above.
+const replyIndicator = document.getElementById('reply-indicator') || createReplyIndicator();
+
+function createReplyIndicator() {
+    const div = document.createElement('div');
+    div.id = 'reply-indicator';
+    div.className = 'hidden bg-gray-100 p-2 text-sm flex justify-between items-center mb-2 rounded';
+
+    // Insert before the input-group container
+    const inputGroup = messageForm.querySelector('.input-group');
+    if (inputGroup) {
+        messageForm.insertBefore(div, inputGroup);
+    } else {
+        messageForm.prepend(div);
+    }
+    return div;
+}
 
 // Auth Logic
 let authMode: 'login' | 'register' = 'login';
@@ -197,6 +221,31 @@ messageForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     console.log('Message submit triggered');
     const text = messageInput.value;
+
+    // Check if it's a poll command (simple CLI-like for MVP)
+    if (text.startsWith('/poll ')) {
+        // Format: /poll Question | Opt1 | Opt2
+        const parts = text.replace('/poll ', '').split('|').map(s => s.trim());
+        if (parts.length >= 3) {
+            const question = parts[0];
+            const options = parts.slice(1);
+            try {
+                if (!currentRoomId) throw new Error('No room selected');
+                await messageService.createPoll({
+                    roomId: currentRoomId,
+                    question,
+                    options,
+                    allowMultiple: false
+                }, currentUser.pub);
+                messageInput.value = '';
+                loadMessages();
+                return;
+            } catch (err) {
+                console.error('Failed to create poll', err);
+            }
+        }
+    }
+
     console.log('Message text:', text, 'Current Room:', currentRoomId);
 
     if (!text || !currentRoomId) {
@@ -206,10 +255,20 @@ messageForm.addEventListener('submit', async (e) => {
 
     try {
         console.log('Calling messageService.sendMessage...');
-        await messageService.sendMessage({
-            roomId: currentRoomId,
-            body: text
-        }, currentUser.pub);
+
+        if (replyingToMessageId) {
+            await messageService.createThread({
+                roomId: currentRoomId,
+                parentMessageId: replyingToMessageId,
+                body: text
+            }, currentUser.pub);
+            cancelThread(); // Reset thread state
+        } else {
+            await messageService.sendMessage({
+                roomId: currentRoomId,
+                body: text
+            }, currentUser.pub);
+        }
         console.log('Message sent successfully');
         messageInput.value = '';
         // Messages should auto-update via subscription if we implement it, 
@@ -253,15 +312,225 @@ function renderMessage(msg: any) {
     // Handle different content types
     if (msg.type === 'text') {
         content.textContent = (msg.content as any).body;
+    } else if (msg.type === 'image') {
+        const img = document.createElement('img');
+        img.src = (msg.content as any).url;
+        img.style.maxWidth = '200px';
+        img.style.borderRadius = '8px';
+        content.appendChild(img);
+    } else if (msg.type === 'poll') {
+        const pollContent = msg.content as any;
+        content.className = 'bg-blue-50 p-2 rounded';
+        const question = document.createElement('div');
+        question.className = 'font-bold mb-2';
+        question.textContent = pollContent.question;
+        content.appendChild(question);
+
+        pollContent.options.forEach((opt: string, idx: number) => {
+            const optDiv = document.createElement('div');
+            optDiv.className = 'flex items-center justify-between mb-1 p-1 hover:bg-blue-100 rounded cursor-pointer';
+
+            const label = document.createElement('span');
+            label.textContent = opt;
+
+            // Calculate votes
+            const votes = msg.poll?.votes?.[idx] || [];
+            const count = document.createElement('span');
+            count.className = 'text-xs font-bold';
+            count.textContent = `${votes.length} votes`;
+
+            optDiv.onclick = () => votePoll(msg, idx);
+
+            optDiv.appendChild(label);
+            optDiv.appendChild(count);
+            content.appendChild(optDiv);
+        });
     } else {
         content.textContent = `[${msg.type} message]`;
     }
 
     div.appendChild(meta);
     div.appendChild(content);
+
+    // Thread/Reply Button
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+
+    const replyBtn = document.createElement('button');
+    replyBtn.textContent = 'Reply';
+    replyBtn.className = 'text-xs text-blue-500 hover:underline ml-2';
+    replyBtn.onclick = () => initiateThread(msg);
+    actions.appendChild(replyBtn);
+
+    div.appendChild(actions);
+
+    // Render thread indicator if it's a thread message
+    if (msg.type === 'thread') {
+        const threadMeta = document.createElement('div');
+        threadMeta.className = 'text-xs text-gray-500 italic mt-1';
+        threadMeta.textContent = `Replying to message...`; // Ideally fetch parent
+        div.appendChild(threadMeta);
+    }
+
+    // Reaction Buttons
+    const reactionsDiv = document.createElement('div');
+    reactionsDiv.className = 'flex gap-2 mt-1';
+
+    ['👍', '❤️', '😂'].forEach(emoji => {
+        const btn = document.createElement('button');
+        btn.textContent = emoji;
+        btn.className = 'text-xs hover:bg-gray-200 rounded px-1';
+        btn.onclick = () => toggleReaction(msg, emoji);
+        reactionsDiv.appendChild(btn);
+    });
+
+    // Display existing reactions
+    if (msg.reactions) {
+        Object.entries(msg.reactions).forEach(([emoji, users]) => {
+            if ((users as string[]).length > 0) {
+                const count = document.createElement('span');
+                count.className = 'text-xs bg-gray-100 rounded px-1 ml-1';
+                count.textContent = `${emoji} ${(users as string[]).length}`;
+                reactionsDiv.appendChild(count);
+            }
+        });
+    }
+
+    div.appendChild(reactionsDiv);
+
     messagesContainer.appendChild(div);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
+// Reaction Logic
+async function toggleReaction(msg: any, emoji: string) {
+    if (!currentUser || !currentRoomId) return;
+
+    try {
+        // Simple toggle logic: if user already reacted, remove; else add
+        // For MVP, let's just add. Remove logic requires checking if user is in the list.
+        const users = msg.reactions?.[emoji] || [];
+        const hasReacted = users.includes(currentUser.pub);
+
+        if (hasReacted) {
+            await messageService.removeReaction({
+                roomId: currentRoomId,
+                messageId: msg.id,
+                emoji,
+                userId: currentUser.pub
+            });
+        } else {
+            await messageService.addReaction({
+                roomId: currentRoomId,
+                messageId: msg.id,
+                emoji,
+                userId: currentUser.pub
+            });
+        }
+        // Refresh messages to show update
+        loadMessages();
+    } catch (err) {
+        console.error('Failed to toggle reaction', err);
+    }
+}
+
+// Poll Logic
+async function votePoll(msg: any, optionIndex: number) {
+    if (!currentUser || !currentRoomId) return;
+
+    try {
+        await messageService.votePoll({
+            roomId: currentRoomId,
+            messageId: msg.id,
+            optionIndex,
+            userId: currentUser.pub
+        });
+        loadMessages();
+    } catch (err) {
+        console.error('Failed to vote', err);
+    }
+}
+
+// Thread Logic
+// replyingToMessageId and replyIndicator moved to top state/DOM section
+
+
+
+function initiateThread(msg: any) {
+    replyingToMessageId = msg.id;
+    replyIndicator.textContent = `Replying to: ${msg.content.body || 'Media'}`;
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = '✕';
+    cancelBtn.className = 'ml-2 text-red-500 font-bold';
+    cancelBtn.onclick = cancelThread;
+
+    replyIndicator.appendChild(cancelBtn);
+    replyIndicator.classList.remove('hidden');
+    messageInput.focus();
+}
+
+function cancelThread() {
+    replyingToMessageId = null;
+    replyIndicator.classList.add('hidden');
+    replyIndicator.innerHTML = '';
+}
+
+// Image Upload Logic
+const imageInput = document.getElementById('image-input') as HTMLInputElement;
+
+imageInput.addEventListener('change', async (e) => {
+    const file = imageInput.files?.[0];
+    if (!file || !currentRoomId) return;
+
+    // Convert to Base64 (simple implementation for MVP)
+    const reader = new FileReader();
+    reader.onload = async () => {
+        const base64 = reader.result as string;
+
+        if (!currentRoomId) {
+            console.error('No room selected');
+            return;
+        }
+
+        try {
+            console.log('Sending image...');
+            await messageService.sendMediaMessage({
+                roomId: currentRoomId,
+                url: base64, // In a real app, upload to storage and send URL
+                mimeType: file.type || 'application/octet-stream',
+                size: file.size
+            }, currentUser.pub);
+            console.log('Image sent');
+            loadMessages();
+        } catch (err) {
+            console.error('Failed to send image', err);
+        }
+    };
+    reader.readAsDataURL(file);
+
+    // Reset input
+    imageInput.value = '';
+});
+
 // Initial check
 console.log('Gun SDK UI Test Loaded');
+
+// Restore session
+async function init() {
+    try {
+        console.log('Attempting to restore session...');
+        const user = await userService.restoreSession();
+        if (user) {
+            console.log('Session restored for:', user.alias);
+            currentUser = user;
+            onLoginSuccess();
+        } else {
+            console.log('No session found, showing login');
+        }
+    } catch (err) {
+        console.error('Error restoring session:', err);
+    }
+}
+
+init();

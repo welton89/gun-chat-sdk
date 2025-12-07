@@ -1,4 +1,5 @@
 import { GunService } from './GunService';
+import { CryptoService } from './CryptoService';
 import {
     Room,
     RoomId,
@@ -18,9 +19,11 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export class RoomService {
     private gunService: GunService;
+    private cryptoService: CryptoService;
 
-    constructor(gunService: GunService) {
+    constructor(gunService: GunService, cryptoService: CryptoService) {
         this.gunService = gunService;
+        this.cryptoService = cryptoService;
     }
 
     /**
@@ -65,6 +68,36 @@ export class RoomService {
             typeMsg: room.typeMsg.reduce((acc, type) => ({ ...acc, [type]: true }), {}),
         };
 
+        // Encryption Logic for Private Rooms and DMs
+        if (dto.type === 'private' || dto.type === 'dm') {
+            try {
+                // Generate symmetric key for the room
+                const roomKey = await this.cryptoService.generateSymmetricKey();
+
+                // Get owner's pair (needed to encrypt the key for themselves)
+                // We assume the user is logged in and we can get the pair from Gun
+                // This is a bit of a hack, ideally we should pass the pair, but for SDK ergonomics we try to get it
+                const user = this.gunService.getUser();
+                const pair = user._.sea;
+
+                if (!pair) {
+                    throw new Error('User must be authenticated to create private room');
+                }
+
+                // Encrypt room key for owner
+                const encryptedKey = await this.cryptoService.encryptRoomKeyForUser(roomKey, ownerId, pair);
+
+                // Store encrypted key in room/keys/{userId}
+                // We'll store it in a separate node to avoid loading it with room details for everyone
+                await this.gunService.put(`rooms/${roomId}/keys/${ownerId}`, encryptedKey);
+
+                console.log('CreateRoom: Generated and stored room key for owner');
+            } catch (err) {
+                console.error('CreateRoom: Failed to generate encryption keys', err);
+                throw err;
+            }
+        }
+
         // Remove undefined keys to avoid Gun.js errors
         Object.keys(roomData).forEach(key => {
             if (roomData[key] === undefined) {
@@ -86,6 +119,9 @@ export class RoomService {
         console.log('CreateRoom: Saving room data', roomId, roomData);
         await this.gunService.put(`rooms/${roomId}`, roomData);
         console.log('CreateRoom: Room saved');
+
+        // Inject ID into returned object
+        room.id = roomId;
         return room;
     }
 
@@ -176,6 +212,40 @@ export class RoomService {
         };
 
         await this.gunService.put(`rooms/${dto.roomId}/members/${dto.userId}`, member);
+
+        // Handle Key Distribution for Private/DM rooms
+        if (room.type === 'private' || room.type === 'dm') {
+            try {
+                const user = this.gunService.getUser();
+                const pair = user._.sea;
+                if (!pair) {
+                    console.warn('AddMember: Cannot distribute key, user not authenticated');
+                    return;
+                }
+
+                // 1. Fetch encrypted key for current user (admin/owner)
+                const myEncryptedKey = await this.gunService.get(`rooms/${dto.roomId}/keys/${pair.pub}`);
+                if (!myEncryptedKey) {
+                    console.error('AddMember: No key found for current user');
+                    return;
+                }
+
+                // 2. Decrypt key
+                const roomKey = await this.cryptoService.decryptRoomKeyFromUser(myEncryptedKey, pair.pub, pair);
+
+                // 3. Encrypt for new member
+                const newMemberEncryptedKey = await this.cryptoService.encryptRoomKeyForUser(roomKey, dto.userId, pair);
+
+                // 4. Store for new member
+                await this.gunService.put(`rooms/${dto.roomId}/keys/${dto.userId}`, newMemberEncryptedKey);
+                console.log('AddMember: Distributed room key to new member');
+
+            } catch (err) {
+                console.error('AddMember: Failed to distribute room key', err);
+                // We don't throw here to avoid blocking the addMember operation if key fails, 
+                // but in a strict E2EE system we probably should.
+            }
+        }
     }
 
     /**
@@ -183,6 +253,10 @@ export class RoomService {
      */
     public async removeMember(roomId: RoomId, userId: UserId): Promise<void> {
         await this.gunService.put(`rooms/${roomId}/members/${userId}`, null);
+        // Ideally we should rotate the key here, but that's complex for MVP
+        // For now, we just remove access to the key node (if we had ACLs on it)
+        // Gun doesn't support deleting the key from history easily without rotation.
+        await this.gunService.put(`rooms/${roomId}/keys/${userId}`, null);
     }
 
     /**
@@ -264,6 +338,36 @@ export class RoomService {
                     manageMembers: false,
                     deleteMessages: false,
                 };
+        }
+    }
+
+    /**
+     * Get the symmetric key for a room (decrypted)
+     * Returns null if no key found or user cannot decrypt
+     */
+    public async getRoomKey(roomId: RoomId): Promise<string | null> {
+        const user = this.gunService.getUser();
+        const pair = user._.sea;
+        if (!pair) {
+            console.warn('GetRoomKey: User not authenticated');
+            return null;
+        }
+
+        const encryptedKey = await this.gunService.get(`rooms/${roomId}/keys/${pair.pub}`);
+        if (!encryptedKey) {
+            // Check if room is public (no key needed)
+            const room = await this.getRoomById(roomId);
+            if (room && room.type === 'public') return null;
+
+            console.warn(`GetRoomKey: No key found for user in room ${roomId}`);
+            return null;
+        }
+
+        try {
+            return await this.cryptoService.decryptRoomKeyFromUser(encryptedKey, pair.pub, pair);
+        } catch (err) {
+            console.error('GetRoomKey: Failed to decrypt key', err);
+            return null;
         }
     }
 }

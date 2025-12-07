@@ -15,6 +15,7 @@ export class GunService {
             peers: peers || [],
             localStorage: true,
             radisk: true,
+            axe: false, // Disable AXE to avoid connecting to default peers automatically
         });
         this.userInstance = this.gun.user().recall({ sessionStorage: true });
     }

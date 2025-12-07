@@ -44,6 +44,19 @@ export class PermissionService {
             return false;
         }
 
+        // Special rules for 'gram' and 'feed' rooms
+        if (room.type === 'gram' || room.type === 'feed') {
+            const isStaff = member.role === 'owner' || member.role === 'admin';
+
+            // If not staff, can only send threads (replies) and reactions
+            if (!isStaff) {
+                const allowedTypesForMembers: MessageType[] = ['thread', 'reaction'];
+                if (!allowedTypesForMembers.includes(messageType)) {
+                    return false;
+                }
+            }
+        }
+
         return true;
     }
 

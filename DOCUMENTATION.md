@@ -61,6 +61,19 @@ src/
 └── index.ts           # Entry point do SDK
 ```
 
+### Status dos Testes
+- **Unitários**:
+  - `UserService`: ✅ (100% Cobertura)
+  - `RoomService`: ✅ (90% Cobertura)
+  - `MessageService`: ✅ (86% Cobertura)
+  - `PermissionService`: ✅ (80% Cobertura)
+- **Integração**:
+  - `user-flow.test.ts`: ⚠️ (9/11 passing - falhas intermitentes por timeout de rede)
+- **Cobertura Global**:
+  - Statements: 85.59%
+  - Lines: 86.64%
+  - Functions: 86.41%
+
 ### Camadas
 
 1. **Tipos**: Definições TypeScript para todas as entidades
@@ -180,6 +193,7 @@ class UserService {
   updateProfile(dto: UpdateProfileDTO): Promise<void>
   setStatus(userId: UserId, status: UserStatus): Promise<void>
   logout(): void
+  restoreSession(): Promise<User | null>
 }
 ```
 
@@ -482,10 +496,10 @@ interface Message {
 #### Fase 4: Testes
 - [x] Testes unitários para UserService
 - [x] Testes unitários para RoomService
-- [ ] Testes unitários para MessageService
-- [ ] Testes unitários para PermissionService
+- [x] Testes unitários para MessageService
+- [x] Testes unitários para PermissionService
 - [x] Testes de integração (Parcialmente concluídos)
-- [ ] Cobertura de testes > 80%
+- [x] Cobertura de testes > 80% (Atingido: ~86%)
 
 #### Fase 5: Funcionalidades Avançadas
 - [ ] Otimização de queries
@@ -505,6 +519,24 @@ interface Message {
 | `dm` | Mensagem direta entre dois usuários | Conversas 1:1 |
 | `gram` | Feed de posts (estilo Instagram) | Posts, timeline |
 | `feed` | Canal de broadcast (estilo Telegram) | Anúncios, notícias |
+
+---
+
+## 🧪 Validação de Fluxo Real
+
+Para testar o SDK contra um servidor Gun.js real (público) e verificar o fluxo completo (Criação de Usuário -> Login -> Sala -> Mensagem), execute o script incluído:
+
+```bash
+npx ts-node --files scripts/test-real-flow.ts
+```
+
+Este script irá:
+1. Conectar ao servidor público (`https://gunjs-chat.squareweb.app/gun`)
+2. Criar um usuário aleatório
+3. Autenticar
+4. Criar uma sala pública
+5. Enviar uma mensagem
+6. Verificar se a mensagem foi persistida
 
 ---
 

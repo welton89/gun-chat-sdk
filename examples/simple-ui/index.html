@@ -70,9 +70,13 @@
                             <div class="empty-state">Select a room to start chatting</div>
                         </div>
 
-                        <form id="message-form" class="hidden">
-                            <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off" />
-                            <button type="submit">Send</button>
+                        <form id="message-form">
+                            <div class="input-group">
+                                <label for="image-input" class="icon-btn" title="Send Image">📷</label>
+                                <input type="file" id="image-input" accept="image/*" style="display: none;">
+                                <input type="text" id="message-input" placeholder="Type a message...">
+                                <button type="submit">Send</button>
+                            </div>
                         </form>
                     </div>
                 </section>

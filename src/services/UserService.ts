@@ -137,4 +137,38 @@ export class UserService {
         const user = this.gunService.getUser();
         user.leave();
     }
+    /**
+     * Restore user session if available
+     */
+    public async restoreSession(): Promise<User | null> {
+        return new Promise((resolve) => {
+            const user = this.gunService.getUser();
+
+            // Gun.js recall with sessionStorage
+            user.recall({ sessionStorage: true }, async (ack: any) => {
+                if (ack && ack.err) {
+                    console.log('RestoreSession: Error restoring session', ack.err);
+                    resolve(null);
+                    return;
+                }
+
+                if (user.is && user.is.pub) {
+                    console.log('RestoreSession: Session restored for', user.is.pub);
+                    const userId = user.is.pub;
+                    const userData = await this.getUser(userId);
+
+                    if (userData) {
+                        // Update status to online
+                        await this.setStatus(userId, 'online');
+                        resolve(userData);
+                    } else {
+                        resolve(null);
+                    }
+                } else {
+                    console.log('RestoreSession: No session found');
+                    resolve(null);
+                }
+            });
+        });
+    }
 }

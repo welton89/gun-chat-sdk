@@ -84,6 +84,7 @@ export interface Message {
     editedAt?: Timestamp;
     reactions: Record<string, UserId[]>;
     readBy: UserId[];
+    isEncrypted?: boolean;
 }
 
 /**

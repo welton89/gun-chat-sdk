@@ -1,7 +1,8 @@
+
 import { PermissionService } from '../../src/services/PermissionService';
 import { RoomService } from '../../src/services/RoomService';
 import { MessageService } from '../../src/services/MessageService';
-import { Room, Message } from '../../src/types';
+import { Room } from '../../src/types';
 
 // Mocks
 const mockRoomService = {
@@ -9,20 +10,8 @@ const mockRoomService = {
 } as unknown as RoomService;
 
 const mockMessageService = {
-    getMessages: jest.fn(), // Not used directly in permission checks but good to mock
-    // We might need a way to get a single message if PermissionService uses it, 
-    // but looking at the service, it often takes messageId. 
-    // Let's check if PermissionService calls messageService.getMessage (it might be private or via getMessages)
-    // Actually PermissionService usually needs to fetch the message to check ownership for deletion.
-    // Let's assume we might need to mock something if PermissionService calls it.
-    // Checking the file content will confirm.
+    getMessages: jest.fn(),
 } as unknown as MessageService;
-
-// We need to see the implementation of PermissionService to know what it calls.
-// Based on common patterns:
-// canSendMessage -> checks room.members[userId] and room.typeMsg
-// canManageMembers -> checks room.members[userId].role
-// canDeleteMessage -> checks room role OR message ownership
 
 describe('PermissionService Unit Tests', () => {
     let permissionService: PermissionService;
@@ -72,6 +61,57 @@ describe('PermissionService Unit Tests', () => {
             const result = await permissionService.canSendMessage(otherId, roomId, 'text');
             expect(result).toBe(false);
         });
+
+        it('should allow members to send threads and reactions in gram rooms', async () => {
+            const gramRoomId = 'gram-room-id';
+            const gramMemberId = 'member-id';
+
+            const mockGramRoom = {
+                type: 'gram',
+                typeMsg: ['text', 'image', 'thread', 'reaction'],
+                members: {
+                    [gramMemberId]: {
+                        role: 'member',
+                        permissions: { sendMessages: true },
+                    },
+                },
+            };
+
+            (mockRoomService.getRoomById as jest.Mock).mockResolvedValue(mockGramRoom);
+
+            // Should allow thread
+            const canThread = await permissionService.canSendMessage(gramMemberId, gramRoomId, 'thread');
+            expect(canThread).toBe(true);
+
+            // Should allow reaction
+            const canReact = await permissionService.canSendMessage(gramMemberId, gramRoomId, 'reaction');
+            expect(canReact).toBe(true);
+
+            // Should NOT allow text (post)
+            const canText = await permissionService.canSendMessage(gramMemberId, gramRoomId, 'text');
+            expect(canText).toBe(false);
+        });
+
+        it('should allow admins to send any message type in gram rooms', async () => {
+            const gramRoomId = 'gram-room-id';
+            const gramAdminId = 'admin-id';
+
+            const mockGramRoom = {
+                type: 'gram',
+                typeMsg: ['text', 'image', 'thread', 'reaction'],
+                members: {
+                    [gramAdminId]: {
+                        role: 'admin',
+                        permissions: { sendMessages: true },
+                    },
+                },
+            };
+
+            (mockRoomService.getRoomById as jest.Mock).mockResolvedValue(mockGramRoom);
+
+            const canText = await permissionService.canSendMessage(gramAdminId, gramRoomId, 'text');
+            expect(canText).toBe(true);
+        });
     });
 
     describe('canManageMembers', () => {
@@ -90,8 +130,81 @@ describe('PermissionService Unit Tests', () => {
             expect(result).toBe(false);
         });
     });
+    describe('canDeleteMessage', () => {
+        it('should allow owner to delete any message', async () => {
+            const result = await permissionService.canDeleteMessage(ownerId, roomId, 'msg-1');
+            expect(result).toBe(true);
+        });
 
-    // Note: canDeleteMessage usually requires fetching the message to check author.
-    // If PermissionService implements this, we need to mock how it gets the message.
-    // If it's not implemented or uses a different approach, we'll adjust.
+        it('should allow admin to delete any message', async () => {
+            const result = await permissionService.canDeleteMessage(adminId, roomId, 'msg-1');
+            expect(result).toBe(true);
+        });
+
+        it('should allow member to delete their own message', async () => {
+            const mockMessages = [
+                { id: 'msg-1', from: memberId, type: 'text' }
+            ];
+            (mockMessageService.getMessages as jest.Mock).mockResolvedValue(mockMessages);
+
+            const result = await permissionService.canDeleteMessage(memberId, roomId, 'msg-1');
+            expect(result).toBe(true);
+        });
+
+        it('should deny member to delete others message', async () => {
+            const mockMessages = [
+                { id: 'msg-1', from: otherId, type: 'text' }
+            ];
+            (mockMessageService.getMessages as jest.Mock).mockResolvedValue(mockMessages);
+
+            const result = await permissionService.canDeleteMessage(memberId, roomId, 'msg-1');
+            expect(result).toBe(false);
+        });
+    });
+
+    describe('canEditRoom', () => {
+        it('should allow owner', async () => {
+            const result = await permissionService.canEditRoom(ownerId, roomId);
+            expect(result).toBe(true);
+        });
+
+        it('should allow admin', async () => {
+            const result = await permissionService.canEditRoom(adminId, roomId);
+            expect(result).toBe(true);
+        });
+
+        it('should deny member', async () => {
+            const result = await permissionService.canEditRoom(memberId, roomId);
+            expect(result).toBe(false);
+        });
+    });
+
+    describe('isRoomOwner', () => {
+        it('should return true for owner', async () => {
+            const result = await permissionService.isRoomOwner(ownerId, roomId);
+            expect(result).toBe(true);
+        });
+
+        it('should return false for non-owner', async () => {
+            const result = await permissionService.isRoomOwner(adminId, roomId);
+            expect(result).toBe(false);
+        });
+    });
+
+    describe('isRoomAdminOrOwner', () => {
+        it('should return true for owner', async () => {
+            const result = await permissionService.isRoomAdminOrOwner(ownerId, roomId);
+            expect(result).toBe(true);
+        });
+
+        it('should return true for admin', async () => {
+            const result = await permissionService.isRoomAdminOrOwner(adminId, roomId);
+            expect(result).toBe(true);
+        });
+
+        it('should return false for member', async () => {
+            const result = await permissionService.isRoomAdminOrOwner(memberId, roomId);
+            expect(result).toBe(false);
+        });
+    });
 });

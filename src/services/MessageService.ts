@@ -1,4 +1,6 @@
 import { GunService } from './GunService';
+import { RoomService } from './RoomService';
+import { CryptoService } from './CryptoService';
 import {
     Message,
     MessageId,
@@ -24,9 +26,16 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export class MessageService {
     private gunService: GunService;
+    private roomService: RoomService; // Needed to fetch room keys
+    private cryptoService: CryptoService; // Needed for encryption
 
-    constructor(gunService: GunService) {
+    constructor(gunService: GunService, roomService?: RoomService, cryptoService?: CryptoService) {
         this.gunService = gunService;
+        // Optional for backward compatibility or if not passed (though should be passed)
+        // We can also use a service locator pattern or just require them if we update all callsites
+        // For now, let's make them optional but warn if missing when needed
+        this.roomService = roomService as RoomService;
+        this.cryptoService = cryptoService as CryptoService;
     }
 
     /**
@@ -46,6 +55,8 @@ export class MessageService {
             reactions: {},
             readBy: [userId],
         };
+
+        await this.handleEncryption(dto.roomId, message);
 
         const messageData = this.serializeMessage(message);
         console.log('MessageService: Saving message data', messageData);
@@ -78,6 +89,8 @@ export class MessageService {
             readBy: [userId],
         };
 
+        await this.handleEncryption(dto.roomId, message);
+
         const messageData = this.serializeMessage(message);
         await this.gunService.put(`messages/${dto.roomId}/${messageId}`, messageData);
         return message;
@@ -106,6 +119,8 @@ export class MessageService {
             readBy: [userId],
         };
 
+        await this.handleEncryption(dto.roomId, message);
+
         const messageData = this.serializeMessage(message);
         await this.gunService.put(`messages/${dto.roomId}/${messageId}`, messageData);
         return message;
@@ -131,6 +146,8 @@ export class MessageService {
             readBy: [userId],
         };
 
+        await this.handleEncryption(dto.roomId, message);
+
         const messageData = this.serializeMessage(message);
         await this.gunService.put(`messages/${dto.roomId}/${messageId}`, messageData);
         return message;
@@ -153,6 +170,22 @@ export class MessageService {
         if (message.type === 'text') {
             const content = message.content as TextContent;
             content.body = dto.newBody;
+
+            // If message was encrypted, we need to re-encrypt the updated content
+            // But editMessage logic here is simple update of fields.
+            // If encrypted, 'content' in DB is a string.
+            // We need to check if room is encrypted.
+            if (this.roomService && this.cryptoService) {
+                const roomKey = await this.roomService.getRoomKey(dto.roomId);
+                if (roomKey) {
+                    // Encrypt the updated content object
+                    const encryptedContent = await this.cryptoService.encryptSymmetric(content, roomKey);
+                    // Update content with encrypted string
+                    await this.gunService.put(`messages/${dto.roomId}/${dto.messageId}/content`, encryptedContent);
+                    await this.gunService.put(`messages/${dto.roomId}/${dto.messageId}/editedAt`, Date.now());
+                    return;
+                }
+            }
 
             await this.gunService.put(`messages/${dto.roomId}/${dto.messageId}/content`, content);
             await this.gunService.put(`messages/${dto.roomId}/${dto.messageId}/editedAt`, Date.now());
@@ -199,6 +232,24 @@ export class MessageService {
         }
 
         // Path: messages/roomId/messageId/content/votes/optionIndex/userId = true
+        // Note: If content is encrypted, we can't easily update a nested path inside it without decrypting/re-encrypting the whole content.
+        // However, for polls, we might want to keep votes separate or not encrypt the structure that holds votes if we want real-time updates without full re-encryption.
+        // OR we accept that polls in private rooms are fully encrypted and voting requires re-writing the content.
+        // But here we are writing to `content/votes/...`. If `content` is a string (encrypted), this path won't work in Gun as expected for the object structure.
+        // FIX: If encrypted, we can't use fine-grained updates on content.
+        // For MVP E2EE, maybe we disable polls in private rooms or we structure data differently.
+        // Or we store votes outside of content?
+        // Let's assume for now we don't support voting in encrypted polls via this method, or we need to fetch-decrypt-update-encrypt-save.
+
+        if (message.isEncrypted) {
+            // Complex case: need to fetch, decrypt, update votes, encrypt, save.
+            // This is prone to conflicts.
+            // For now, let's just log a warning or try to update if possible.
+            // Actually, if content is a string, `content/votes` path doesn't exist.
+            console.warn('VotePoll: Voting on encrypted polls requires full update, not implemented efficiently yet.');
+            return;
+        }
+
         await this.gunService.put(`messages/${dto.roomId}/${dto.messageId}/content/votes/${dto.optionIndex}/${dto.userId}`, true);
     }
 
@@ -221,6 +272,12 @@ export class MessageService {
         const allMessages = await this.gunService.get(`messages/${roomId}`);
         let messages: Message[] = [];
 
+        // Try to get room key
+        let roomKey: string | null = null;
+        if (this.roomService) {
+            roomKey = await this.roomService.getRoomKey(roomId);
+        }
+
         if (allMessages) {
             const messagePromises = Object.keys(allMessages).map(async (messageId) => {
                 // Skip Gun metadata
@@ -240,6 +297,21 @@ export class MessageService {
                 if (messageData && (!before || messageData.timestamp < before)) {
                     const message = this.deserializeMessage(messageData);
                     message.id = messageId;
+
+                    // Decrypt if needed
+                    if (message.isEncrypted && roomKey && this.cryptoService) {
+                        try {
+                            const decryptedContent = await this.cryptoService.decryptSymmetric(message.content as any, roomKey);
+                            if (decryptedContent) {
+                                message.content = decryptedContent;
+                            }
+                        } catch (err) {
+                            console.error(`Failed to decrypt message ${messageId}`, err);
+                            // Keep encrypted content or mark as error
+                            (message.content as any) = { body: '⚠️ Decryption failed' };
+                        }
+                    }
+
                     return message;
                 }
                 return null;
@@ -261,11 +333,44 @@ export class MessageService {
     }
 
     /**
+     * Helper to handle encryption before sending
+     */
+    private async handleEncryption(roomId: RoomId, message: Message): Promise<void> {
+        if (this.roomService && this.cryptoService) {
+            const roomKey = await this.roomService.getRoomKey(roomId);
+            if (roomKey) {
+                // Encrypt content
+                const encryptedContent = await this.cryptoService.encryptSymmetric(message.content, roomKey);
+                message.content = encryptedContent as any; // Cast to any because content is typed as specific objects
+                message.isEncrypted = true;
+            }
+        }
+    }
+
+    /**
      * Get a single message
      */
     private async getMessage(roomId: RoomId, messageId: MessageId): Promise<Message | null> {
         const messageData = await this.gunService.get(`messages/${roomId}/${messageId}`);
-        return messageData ? this.deserializeMessage(messageData) : null;
+        if (!messageData) return null;
+
+        const message = this.deserializeMessage(messageData);
+
+        // Decrypt if needed (single message fetch)
+        if (message.isEncrypted && this.roomService && this.cryptoService) {
+            const roomKey = await this.roomService.getRoomKey(roomId);
+            if (roomKey) {
+                try {
+                    const decryptedContent = await this.cryptoService.decryptSymmetric(message.content as any, roomKey);
+                    if (decryptedContent) {
+                        message.content = decryptedContent;
+                    }
+                } catch (err) {
+                    console.error(`Failed to decrypt message ${messageId}`, err);
+                }
+            }
+        }
+        return message;
     }
 
     /**
@@ -288,7 +393,8 @@ export class MessageService {
         }
 
         // Handle Poll content
-        if (message.type === 'poll') {
+        // If encrypted, content is a string, so we skip this
+        if (message.type === 'poll' && !message.isEncrypted) {
             const content = { ...message.content as PollContent };
             // Options array to object (index as key)
             content.options = content.options.reduce((acc, opt, idx) => ({ ...acc, [idx]: opt }), {}) as any;
@@ -340,7 +446,8 @@ export class MessageService {
         }
 
         // Handle Poll content
-        if (message.type === 'poll' && message.content) {
+        // If encrypted, content is a string, so we skip this
+        if (message.type === 'poll' && message.content && !message.isEncrypted) {
             const content = { ...message.content };
 
             // Options object to array

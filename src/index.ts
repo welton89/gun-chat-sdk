@@ -12,3 +12,4 @@ export { UserService } from './services/UserService';
 export { RoomService } from './services/RoomService';
 export { MessageService } from './services/MessageService';
 export { PermissionService } from './services/PermissionService';
+export { CryptoService } from './services/CryptoService';

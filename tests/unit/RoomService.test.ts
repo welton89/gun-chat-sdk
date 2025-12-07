@@ -7,6 +7,7 @@ jest.mock('gun', () => {
     return jest.fn(() => ({
         user: jest.fn(() => ({
             recall: jest.fn(),
+            _: { sea: { pub: 'mock-pub', epriv: 'mock-epriv' } } // Mock SEA pair
         })),
         get: jest.fn(() => ({
             put: jest.fn(),
@@ -21,13 +22,27 @@ jest.mock('uuid', () => ({
     v4: jest.fn(() => 'mock-room-id'),
 }));
 
+// Mock CryptoService
+const mockCryptoService = {
+    generateSymmetricKey: jest.fn(),
+    encryptRoomKeyForUser: jest.fn(),
+    decryptRoomKeyFromUser: jest.fn(),
+};
+
 describe('RoomService', () => {
     let gunService: GunService;
     let roomService: RoomService;
 
     beforeEach(() => {
         gunService = GunService.getInstance();
-        roomService = new RoomService(gunService);
+        roomService = new RoomService(gunService, mockCryptoService as any);
+
+        // Mock getUser to return user with SEA pair
+        jest.spyOn(gunService, 'getUser').mockReturnValue({
+            _: { sea: { pub: 'mock-pub', epriv: 'mock-epriv' } },
+            is: { pub: 'mock-pub' }
+        });
+
         jest.clearAllMocks();
     });
 
@@ -51,7 +66,7 @@ describe('RoomService', () => {
             expect(room.members[ownerId].role).toBe('owner');
         });
 
-        it('should create a private room', async () => {
+        it('should create a private room and generate keys', async () => {
             const dto: CreateRoomDTO = {
                 name: 'Private Room',
                 type: 'private',
@@ -59,10 +74,18 @@ describe('RoomService', () => {
             const ownerId = 'owner-id';
 
             jest.spyOn(gunService, 'put').mockResolvedValue(undefined);
+            mockCryptoService.generateSymmetricKey.mockResolvedValue('mock-room-key');
+            mockCryptoService.encryptRoomKeyForUser.mockResolvedValue('encrypted-room-key');
 
             const room = await roomService.createRoom(dto, ownerId);
 
             expect(room.type).toBe('private');
+            expect(mockCryptoService.generateSymmetricKey).toHaveBeenCalled();
+            expect(mockCryptoService.encryptRoomKeyForUser).toHaveBeenCalled();
+            expect(gunService.put).toHaveBeenCalledWith(
+                `rooms/mock-room-id/keys/${ownerId}`,
+                'encrypted-room-key'
+            );
         });
 
         it('should create a gram room', async () => {
@@ -174,15 +197,22 @@ describe('RoomService', () => {
 
             const expectedRoom = {
                 ...mockRoomData,
+                id: roomId,
                 typeMsg: ['text'],
             };
 
-            jest.spyOn(gunService, 'get').mockResolvedValue(mockRoomData);
+            jest.spyOn(gunService, 'get').mockImplementation((path) => {
+                if (path.endsWith('/members')) {
+                    return Promise.resolve({});
+                }
+                return Promise.resolve(mockRoomData);
+            });
 
             const room = await roomService.getRoomById(roomId);
 
             expect(room).toEqual(expectedRoom);
             expect(gunService.get).toHaveBeenCalledWith(`rooms/${roomId}`);
+            expect(gunService.get).toHaveBeenCalledWith(`rooms/${roomId}/members`);
         });
 
         it('should return null if room does not exist', async () => {
@@ -319,6 +349,101 @@ describe('RoomService', () => {
             await roomService.deleteRoom(roomId);
 
             expect(gunService.put).toHaveBeenCalledWith(`rooms/${roomId}`, null);
+        });
+    });
+    describe('updateRoom', () => {
+        it('should update room settings', async () => {
+            const dto = {
+                roomId: 'room-id',
+                settings: {
+                    description: 'New Description'
+                }
+            };
+
+            jest.spyOn(roomService, 'getRoomById').mockResolvedValue({
+                id: 'room-id',
+                name: 'Room',
+                type: 'public',
+                typeMsg: ['text'],
+                owner: 'owner',
+                createdAt: Date.now(),
+                settings: {},
+                members: {}
+            } as any);
+            jest.spyOn(gunService, 'put').mockResolvedValue(undefined);
+
+            await roomService.updateRoom(dto);
+
+            expect(gunService.put).toHaveBeenCalledWith(
+                `rooms/${dto.roomId}/settings`,
+                expect.objectContaining({ description: 'New Description' })
+            );
+        });
+
+        it('should update room name', async () => {
+            const dto = {
+                roomId: 'room-id',
+                name: 'New Name'
+            };
+
+            jest.spyOn(roomService, 'getRoomById').mockResolvedValue({
+                id: 'room-id',
+                name: 'Room',
+                type: 'public',
+                typeMsg: ['text'],
+                owner: 'owner',
+                createdAt: Date.now(),
+                settings: {},
+                members: {}
+            } as any);
+            jest.spyOn(gunService, 'put').mockResolvedValue(undefined);
+
+            await roomService.updateRoom(dto);
+
+            expect(gunService.put).toHaveBeenCalledWith(
+                `rooms/${dto.roomId}/name`,
+                'New Name'
+            );
+        });
+    });
+
+    describe('listRooms', () => {
+        it('should list rooms for user', async () => {
+            const userId = 'user-id';
+            const mockRoomsData = {
+                'room-1': { name: 'Room 1' },
+                'room-2': { name: 'Room 2' }
+            };
+
+            jest.spyOn(gunService, 'get').mockResolvedValue(mockRoomsData);
+
+            // Mock getRoomById to return a promise that resolves to the room
+            jest.spyOn(roomService, 'getRoomById').mockImplementation(async (id) => {
+                return {
+                    id,
+                    name: `Room ${id.split('-')[1]}`,
+                    type: 'public',
+                    typeMsg: ['text'],
+                    owner: 'owner',
+                    createdAt: Date.now(),
+                    settings: {},
+                    members: {
+                        [userId]: { role: 'member', joinedAt: Date.now(), permissions: {} }
+                    }
+                } as any;
+            });
+
+            const rooms = await roomService.listRooms(userId);
+
+            // Wait for any pending promises if necessary (though await listRooms should handle it)
+            expect(rooms).toBeDefined();
+            expect(rooms.length).toBe(2);
+
+            // Sort rooms by ID to ensure deterministic order for assertion
+            const sortedRooms = rooms.sort((a, b) => a.id!.localeCompare(b.id!));
+
+            expect(sortedRooms[0].id).toBe('room-1');
+            expect(sortedRooms[1].id).toBe('room-2');
         });
     });
 });

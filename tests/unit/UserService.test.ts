@@ -258,4 +258,66 @@ describe('UserService', () => {
             expect(mockUser.leave).toHaveBeenCalled();
         });
     });
+    describe('restoreSession', () => {
+        it('should restore session successfully', async () => {
+            const userId = 'mock-user-id';
+            const mockUserData = {
+                alias: 'testuser',
+                pub: userId,
+                profile: { status: 'offline' },
+                createdAt: Date.now(),
+            };
+
+            // Mock successful recall
+            mockUser.recall.mockImplementation((_opts: any, callback: any) => {
+                callback({ ok: true });
+            });
+
+            // Mock getUser to return user data
+            jest.spyOn(userService, 'getUser').mockResolvedValue(mockUserData as any);
+            jest.spyOn(userService, 'setStatus').mockResolvedValue(undefined);
+
+            const user = await userService.restoreSession();
+
+            expect(user).toEqual(mockUserData);
+            expect(mockUser.recall).toHaveBeenCalledWith({ sessionStorage: true }, expect.any(Function));
+            expect(userService.setStatus).toHaveBeenCalledWith(userId, 'online');
+        });
+
+        it('should return null if recall fails', async () => {
+            // Mock failed recall
+            mockUser.recall.mockImplementation((_opts: any, callback: any) => {
+                callback({ err: 'No session' });
+            });
+
+            const user = await userService.restoreSession();
+
+            expect(user).toBeNull();
+        });
+
+        it('should return null if user data not found', async () => {
+            // Mock successful recall but user data missing
+            mockUser.recall.mockImplementation((_opts: any, callback: any) => {
+                callback({ ok: true });
+            });
+
+            jest.spyOn(userService, 'getUser').mockResolvedValue(null);
+
+            const user = await userService.restoreSession();
+
+            expect(user).toBeNull();
+        });
+
+        it('should return null if no session found (empty ack)', async () => {
+            // Mock empty recall (no session)
+            mockUser.is = undefined; // Simulate no user logged in
+            mockUser.recall.mockImplementation((_opts: any, callback: any) => {
+                callback({}); // Empty ack
+            });
+
+            const user = await userService.restoreSession();
+
+            expect(user).toBeNull();
+        });
+    });
 });
